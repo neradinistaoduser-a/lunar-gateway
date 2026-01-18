@@ -2,7 +2,6 @@ package client
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 	"log"
@@ -13,8 +12,11 @@ import (
 	"github.com/goccy/go-json"
 	"github.com/gorilla/mux"
 	"github.com/jhump/protoreflect/grpcreflect"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 )
 
 type Client struct {
@@ -61,22 +63,49 @@ func (client *Client) InvokeGrpcMethod(writer http.ResponseWriter, req *http.Req
 
 	headers := prepareHeaders(req.Header)
 
+	ctx := req.Context()
+
+	ctx = otel.GetTextMapPropagator().Extract(
+		ctx,
+		propagation.HeaderCarrier(req.Header),
+	)
+	md := metadata.New(nil)
+	otel.GetTextMapPropagator().Inject(
+		ctx,
+		propagation.HeaderCarrier(md),
+	)
+	for k, v := range md {
+		headers = append(headers, fmt.Sprintf("%s: %s", k, v[0]))
+	}
+
 	var resultBuffer bytes.Buffer
-	rf, formatter, _ := grpcurl.RequestParserAndFormatter(grpcurl.Format("json"), descSource, reader, grpcurl.FormatOptions{})
+	rf, formatter, _ := grpcurl.RequestParserAndFormatter(
+		grpcurl.Format("json"),
+		descSource,
+		reader,
+		grpcurl.FormatOptions{},
+	)
+
 	h := &grpcurl.DefaultEventHandler{
 		Out:            &resultBuffer,
 		Formatter:      formatter,
 		VerbosityLevel: 0,
 	}
 
-	err := grpcurl.InvokeRPC(context.Background(), descSource, client.cc, client.grpcServiceName+"/"+mtdName, headers, h, rf.Next)
+	err := grpcurl.InvokeRPC(
+		ctx,
+		descSource,
+		client.cc,
+		client.grpcServiceName+"/"+mtdName,
+		headers,
+		h,
+		rf.Next,
+	)
 	if err != nil {
 		log.Printf("[Error] %+v", err)
 		http.Error(writer, err.Error(), http.StatusBadRequest)
 		return
 	}
-
-	log.Printf("Status code: %s", h.Status.Code())
 
 	httpCode := statusCodes[h.Status.Code()]
 	if h.Status.Message() != "" {

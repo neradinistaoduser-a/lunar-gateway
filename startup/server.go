@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/gorilla/mux"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 type Server struct {
@@ -30,7 +31,14 @@ func (s *Server) Start() {
 	clientRegistry := s.prepareClients()
 	s.noAuthMethods = getNoAuthMethods(s.noAuthConfig.Groups["core"]["v1"])
 	router := s.prepareRoutes(clientRegistry)
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", s.config.Gateway.Port), router))
+	handler := otelhttp.NewHandler(router, "lunar-http")
+
+	server := &http.Server{
+		Addr:    fmt.Sprintf(":%s", s.config.Gateway.Port),
+		Handler: handler,
+	}
+
+	log.Fatal(server.ListenAndServe())
 }
 
 func (s *Server) prepareClients() *client.ClientRegistry {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/fullstorydev/grpcurl"
 	"github.com/jhump/protoreflect/grpcreflect"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -22,8 +23,13 @@ func (registry *ClientRegistry) NewClient(name, address string) {
 	var cc *grpc.ClientConn
 	var err error
 	defer cancel()
-	if cc, err = grpc.DialContext(ctx, address,
-		grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock()); err != nil {
+	if cc, err = grpc.DialContext(
+		ctx,
+		address,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		grpc.WithBlock(),
+	); err != nil {
 		panic(err)
 	}
 	refClient := grpcreflect.NewClientAuto(context.Background(), cc)
